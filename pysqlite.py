@@ -57,7 +57,7 @@ class Database(sqlite3.Connection):
 		new_cursor = self.cursor()
 		cursor_id = hex(int(1000 * time.time())) + hex(id(new_cursor))
 		self.cursors[cursor_id] = new_cursor
-		return newCursor
+		return new_cursor
 
 	def purgeCursors(self):
 		'''Deletes all of the stored cursors
