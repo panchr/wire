@@ -85,12 +85,13 @@ This clause searches for specific rows. If a clause is not provided, the query w
 Currently, PYSQLite supports three types of clauses (combinations among the three are allowed): *WHERE*, *LIKE*, and a mix.
 
 These can be provided as arguments. To any function that requires a row filtering method, the following arguments are availabile:
-	1. equal: this is a dictionary of columns and values to use in the *WHERE* clause using the *=* operator
-	2. like: also a dictionary of columns and values, but it utilizes the *LIKE* operator
 
-	Both *equal* and *like* use the *AND* operator to join clauses.
+1. equal: this is a dictionary of columns and values to use in the *WHERE* clause using the *=* operator
+2. like: also a dictionary of columns and values, but it utilizes the *LIKE* operator
 
-	3. where: This is a custom SQL clause. If you want to use an *OR* operator, this must be used.
+Both *equal* and *like* use the *AND* operator to join clauses.
+
+3. where: This is a custom SQL clause. If you want to use an *OR* operator, this must be used.
 
 For example, you can select all of the rows that have an ID of 5, using *Database.select*:
 
