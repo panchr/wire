@@ -69,6 +69,11 @@ class Database(sqlite3.Connection):
 		self.commit()
 		return exec_cursor
 
+	def query(self, cmd, *args, **kwargs):
+		'''Executes an SQL command
+		This is the same as self.execute'''
+		return self.execute(cmd, *args, **kwargs)
+
 	def executeFile(self, file_path):
 		'''Executes the commands from a file path; each command is delimited with a semicolon
 
