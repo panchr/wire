@@ -4,6 +4,7 @@ PySQLite
 Python Wrapper for the standard sqlite3 API
 
 PySQLite serves to simplify the process of creating and maintaining local databases.
+
 It utilizes the built-in sqlite3 package, and does not require any external files.
 Because of this, it is extremely lightweight.
 
@@ -27,6 +28,10 @@ Alternatively, a database can be created by executing a script of SQL commands:
 db = pysqlite.Database.create("test_creator.sql")
 ```
 
+### Creating or Dropping Tables
+
+<pre><code>Database.createTable</code> </pre> and <pre><code>Database.dropTable</code></pre> can be used to create or drop tables, respectively.
+
 ### Executing Commands
 
 Commands/queries can easily be sent to the database:
@@ -44,3 +49,7 @@ query = db.query("SELECT * FROM myTable")
 ```
 
 Any command or query will return a [sqlite3.Cursor](https://docs.python.org/2/library/sqlite3.html?highlight=sqlite3#cursor-objects "Python Documentation: sqlite3.Cursor") instance.
+
+Common queries, such as insert, update, select, and delete, are built in.
+
+

@@ -44,14 +44,34 @@ class Database(sqlite3.Connection):
 		returns a Database (wrapper to sqlite3.Connection) instance'''
 		return self.executeFile(file_path)
 
-	def new_cursor(self):
+	def newCursor(self):
 		'''Creates a new SQLite cursor
+
+		Arguments:
+			None
+
+		Usage:
+			cursor = db.newCursor()
 
 		returns a sqlite3.Cursor instance'''
 		new_cursor = self.cursor()
 		cursor_id = hex(int(1000 * time.time())) + hex(id(new_cursor))
 		self.cursors[cursor_id] = new_cursor
-		return new_cursor
+		return newCursor
+
+	def purgeCursors(self):
+		'''Deletes all of the stored cursors
+
+		Arguments:
+			None
+
+		Usage:
+			db.purgeCursors()
+
+		returns None'''
+		for cursor_id, cursor in self.cursors.iteritems():
+			del self.cursors[cursor_id]
+			del cursor
 
 	def execute(self, cmd, *args, **kwargs):
 		'''Executes an SQL command
@@ -63,14 +83,14 @@ class Database(sqlite3.Connection):
 			query = db.execute("SELECT * FROM MY_TABLE")
 
 		returns a sqlite3.Cursor instance'''
-		print cmd
-		exec_cursor = self.new_cursor()
+		exec_cursor = self.newCursor()
 		exec_cursor.execute(cmd, *args, **kwargs)
 		self.commit()
 		return exec_cursor
 
 	def query(self, cmd, *args, **kwargs):
 		'''Executes an SQL command
+		
 		This is the same as self.execute'''
 		return self.execute(cmd, *args, **kwargs)
 
@@ -99,7 +119,7 @@ class Database(sqlite3.Connection):
 				INSERT INTO users (1, 'panchr');""")
 
 		returns a sqlite3.Cursor instance'''
-		exec_cursor = self.new_cursor()
+		exec_cursor = self.newCursor()
 		exec_cursor.executescript(sql_script)
 		self.commit()
 		return exec_cursor
@@ -124,6 +144,31 @@ class Database(sqlite3.Connection):
 		query = "CREATE TABLE {table} ({columns})".format(table = name, columns = ','.join(column + ' ' + columns[column] for column in columns))
 		return self.execute(query)
 
+	def dropTable(self, name):
+		'''Drops a table from the database
+
+		Arguments:
+			name - name of the table to be dropped
+
+		Usage:
+			db.dropTable("users")
+
+		returns an sqlite3.Cursor instance'''
+		query = "DROP TABLE {table}".format(table = name)
+		return self.execute(query)
+
+	def setTable(self, table):
+		'''Sets the default table to use for queries
+
+		Arguments:
+			table - name of default table
+
+		Usage:
+			db.setTable("users")
+
+		returns None'''
+		self.table = table
+
 	def insert(self, table = None, **columns):
 		'''Inserts "columns" into "table"
 
@@ -143,6 +188,33 @@ class Database(sqlite3.Connection):
 		query = "INSERT INTO {table} ({columns}) VALUES ({values})".format(table = table, columns = ','.join(column_names), values = ','.join(map(str, values)))
 		return self.execute(query)
 
+	def update(self, table = None, equal = None, like = None, where = "1 = 1", **columns):
+		'''Updates columns in the table
+
+		Arguments:
+			table - name of table to update
+			equal - dictionary of columns and values to use in WHERE  + "=" clauses {column_name: value, ...}
+			like - dictionary of columns and values to use in WHERE + LIKE clauses (column_name: pattern, ...}
+			where - custom WHERE and/or LIKE clause(s)
+			columns - dictionary of column names and values {column_name: value, ...}
+
+		Usage:
+			db.update("table", equal = {"id": 5}, username = "new_username")
+
+		returns a sqlite3.Cursor instance'''
+		if not table:
+			table = self.table
+		if not equal:
+			equal = {}
+		if not like:
+			like = {}
+		column_str = ','.join("{column}={value}".format(column = column, value = value) for column, value in columns.iteritems())
+		like = ' AND '.join("`{column}` LIKE '{pattern}'".format(column = column, pattern = pattern) for column, pattern in like.iteritems())
+		equal = ' AND '.join('`{column}` = {pattern}'.format(column = column, pattern = escapeString(pattern)) for column, pattern in equal.iteritems())
+		where = ' AND '.join(filter(lambda item: bool(item), [like, equal, where]))
+		query = "UPDATE {table} SET {columns} WHERE {where}".format(table = table, columns = column_str, where = where)
+		return self.execute(query)
+
 	def select(self, table = None, **options):
 		'''Selects "columns" from "table"
 
@@ -155,7 +227,7 @@ class Database(sqlite3.Connection):
 
 		Usage:
 			query = db.select("users", columns = ALL, equal = {"id": 1}, like = {"username": "pan%"})
-			query = db.select("users", columns = ALL, clause = "`ID` = 1 OR `USERNAME` LIKE 'pan%'")
+			query = db.select("users", columns = ALL, where = "`ID` = 1 OR `USERNAME` LIKE 'pan%'")
 
 		returns a sqlite3.Cursor instance'''
 		if not table:
@@ -167,17 +239,26 @@ class Database(sqlite3.Connection):
 		query = "SELECT {columns} FROM {table} WHERE {where}".format(columns = columns, table = table, where = where)
 		return self.execute(query)
 
-	def setTable(self, table):
-		'''Sets the default table to use for queries
+	def delete(self, table = None, **options):
+		'''Deletes rows from the table
 
 		Arguments:
-			table - name of default table
+			table - name of table to delete from
+			equal - dictionary of columns and values to use in WHERE  + "=" clauses {column_name: value, ...}
+			like - dictionary of columns and values to use in WHERE + LIKE clauses (column_name: pattern, ...}
+			where - custom WHERE and/or LIKE clause(s)
 
 		Usage:
-			db.setTable("users")
+			db.delete("users", equal = {"id": 5})
 
-		returns None'''
-		self.table = table
+		returns a sqlite3.Cursor instance'''
+		if not table:
+			table = self.table
+		like = ' AND '.join("`{column}` LIKE '{pattern}'".format(column = column, pattern = pattern) for column, pattern in options.get('like', {}).iteritems())
+		equal = ' AND '.join('`{column}` = {pattern}'.format(column = column, pattern = escapeString(pattern)) for column, pattern in options.get('equal', {}).iteritems())
+		where = ' AND '.join(filter(lambda item: bool(item), [like, equal, options.get('where', '1 = 1')]))
+		query = "DELETE FROM {table} WHERE {where}".format(table = table, where = where)
+		return self.execute(query)
 
 	def count(self):
 		'''Finds the number of rows created, modified, or deleted during this database connection
