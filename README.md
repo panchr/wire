@@ -30,7 +30,7 @@ db = pysqlite.Database.create("test_creator.sql")
 
 ### Creating or Dropping Tables
 
-<pre><code>Database.createTable</code> </pre> and <pre><code>Database.dropTable</code></pre> can be used to create or drop tables, respectively.
+*Database.createTable* and <pre><code>Database.dropTable</code></pre> can be used to create or drop tables, respectively.
 
 ### Executing Commands
 
