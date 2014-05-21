@@ -32,17 +32,20 @@ class Database(sqlite3.Connection):
 		self.table = None
 
 	@staticmethod
-	def create(self, file_path):
+	def create(name, file_path):
 		'''Creates an SQLite database from an SQL file
 
 		Arguments:
+			name - name of new database
 			file_path - path to the file
 
 		Usage:
 			db = Database.create("db_commands.sql")
 
 		returns a Database (wrapper to sqlite3.Connection) instance'''
-		return self.executeFile(file_path)
+		db = Database(name)
+		db.executeFile(file_path)
+		return db
 
 	def newCursor(self):
 		'''Creates a new SQLite cursor
@@ -169,6 +172,19 @@ class Database(sqlite3.Connection):
 		returns None'''
 		self.table = table
 
+	def fetch(self, cursor, type_fetch = "all", type = dict):
+		'''Fetches columns from the cursor
+
+		Arguments:
+			cursor - cursor instance
+			type_fetch - how many to fetch (all, one)
+			type - type of fetch (dict, list)'''
+		rows = cursor.fetchall() if type_fetch == "all" else [cursor.fetchone()]
+		if type == dict:
+			return [{column[0]: row[index] for index, column in enumerate(cursor.description)} for row in rows]
+		else:
+			return rows
+
 	def insert(self, table = None, **columns):
 		'''Inserts "columns" into "table"
 
@@ -184,7 +200,6 @@ class Database(sqlite3.Connection):
 			table = self.table
 		column_names = ['`{column}`'.format(column = column) for column in columns.keys()]
 		values = map(escapeString, [columns[column.replace('`', '')] for column in column_names])
-		print values
 		query = "INSERT INTO {table} ({columns}) VALUES ({values})".format(table = table, columns = ','.join(column_names), values = ','.join(map(str, values)))
 		return self.execute(query)
 
@@ -232,7 +247,9 @@ class Database(sqlite3.Connection):
 		returns a sqlite3.Cursor instance'''
 		if not table:
 			table = self.table
-		columns = ','.join(options.get('columns', ALL))
+		columns = ','.join('`{column}`'.format(column = column) for column in options.get('columns', ALL))
+		if columns == "`*`":
+			columns = "*"
 		like = ' AND '.join("`{column}` LIKE '{pattern}'".format(column = column, pattern = pattern) for column, pattern in options.get('like', {}).iteritems())
 		equal = ' AND '.join('`{column}` = {pattern}'.format(column = column, pattern = escapeString(pattern)) for column, pattern in options.get('equal', {}).iteritems())
 		where = ' AND '.join(filter(lambda item: bool(item), [like, equal, options.get('where', '1 = 1')]))

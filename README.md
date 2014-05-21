@@ -14,6 +14,7 @@ Examples
 ### Creating/Accessing a database
 
 ```python
+
 import pysqlite
 # the import is assumed for the rest of the examples
 
@@ -25,7 +26,7 @@ Alternatively, a database can be created by executing a script of SQL commands:
 
 ```python
 
-db = pysqlite.Database.create("test_creator.sql")
+db = pysqlite.Database.create("test.db", "test_creator.sql")
 ```
 
 ### Creating or Dropping Tables
