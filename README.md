@@ -100,6 +100,12 @@ For example, you can select all of the rows that have an ID of 5, using *Databas
 db.select("users", columns = ALL, equal = {"id": 5})
 ```
 
+To actually retrieve the data (in a list of dictionaries), use the *ExecutionCursor.fetch*:
+
+```python
+db.select("users", columns = ALL, equal = {"id": 5}).fetch()
+```
+
 Alternatively, you can update every row to have an ID of 6, whose "username" column starts with "pan", using *Database.update*:
 
 ```python
@@ -110,4 +116,19 @@ Finally, deleting a row whose username starts with "pan" or has an ID of 5, usin
 
 ```python
 db.delete("users", where = "`id`=5 OR `username` LIKE 'pan%'")
+```
+
+### Exporting Query Results
+
+The results of a query (this is mainly useful for SELECT queries) can be exported to a CSV (comma separated values) file.
+This can be done with the *ExecutionCursor.export* method:
+
+```python
+db.select("users").export("users.csv")
+```
+
+This works for the result of any query with any clause:
+
+```python
+db.select("users", equal = {"id": 5}).export("users.csv")
 ```

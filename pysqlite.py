@@ -7,6 +7,7 @@
 
 import sqlite3
 import time
+import csv
 
 ### Constants
 
@@ -27,6 +28,7 @@ class Database(sqlite3.Connection):
 
 		returns a Database (wrapper to sqlite3.Connection) instance'''
 		sqlite3.Connection.__init__(self, path, *args, **kwargs)
+		self.path = path
 		self.cursors = {}
 		self.reset_counter = 0
 		self.table = None
@@ -337,6 +339,21 @@ class ExecutionCursor(object):
 			return_value =  rows
 		self.fetched = return_value
 		return return_value
+
+	def export(self, filepath = "sqlite_export.csv"):
+		'''Exports the results to a CSV (Comma separated values) file
+
+		Arguments:
+			filepath - path of the CSV file(defaults to "sqlite_export.csv")
+
+		Usage:
+			db.export("mytable.csv")
+
+		returns None'''
+		with open(filepath, 'wb') as csv_file:
+			csv_writer = csv.writer(csv_file)
+			csv_writer.writerow([header[0] for header in self.description])
+			csv_writer.writerows(self.cursor)
 
 ### Misc. Functions
 
