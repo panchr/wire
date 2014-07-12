@@ -287,8 +287,6 @@ class Database(sqlite3.Connection):
 		equal_items = options.get('equal', {}).items()
 		equal_str = ' AND '.join("`{column}` = ?".format(column = column[0]) for column in equal_items)
 		values.extend([column[1] for column in equal_items])
-		# like = ' AND '.join("`{column}` LIKE '{pattern}'".format(column = column, pattern = pattern) for column, pattern in options.get('like', {}).iteritems())
-		# equal = ' AND '.join('`{column}` = {pattern}'.format(column = column, pattern = escapeString(pattern)) for column, pattern in options.get('equal', {}).iteritems())
 		where = ' AND '.join(filter(lambda item: bool(item), [like_str, equal_str, options.get('where', '1 = 1')]))
 		query = "DELETE FROM {table} WHERE {where}".format(table = table, where = where)
 		return self.execute(query, values)
@@ -321,6 +319,7 @@ class ExecutionCursor(object):
 	'''Provides additional functionality to the sqlite3.Cursor object'''
 	def __init__(self, cursor):
 		self.cursor = cursor
+		self.fetchall, self.fetchone, self.description = self.cursor.fetchall, self.cursor.fetchone, self.cursor.description
 		self.fetched = None
 
 	def fetch(self, type_fetch = "all", type = dict):
