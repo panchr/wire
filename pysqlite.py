@@ -30,6 +30,7 @@ class Database(sqlite3.Connection):
 		self.cursors = {}
 		self.reset_counter = 0
 		self.table = None
+		self.debug = False
 
 	@staticmethod
 	def create(name, file_path):
@@ -86,10 +87,12 @@ class Database(sqlite3.Connection):
 			query = db.execute("SELECT * FROM MY_TABLE")
 
 		returns a sqlite3.Cursor instance'''
+		if self.debug:
+			print cmd, args, kwargs
 		exec_cursor = self.newCursor()
 		exec_cursor.execute(cmd, *args, **kwargs)
 		self.commit()
-		return exec_cursor
+		return ExecutionCursor(exec_cursor)
 
 	def query(self, cmd, *args, **kwargs):
 		'''Executes an SQL command
@@ -125,7 +128,7 @@ class Database(sqlite3.Connection):
 		exec_cursor = self.newCursor()
 		exec_cursor.executescript(sql_script)
 		self.commit()
-		return exec_cursor
+		return ExecutionCursor(exec_cursor)
 
 	def createTable(self, name, **columns):
 		'''Creates a table in the database
@@ -179,11 +182,7 @@ class Database(sqlite3.Connection):
 			cursor - cursor instance
 			type_fetch - how many to fetch (all, one)
 			type - type of fetch (dict, list)'''
-		rows = cursor.fetchall() if type_fetch == "all" else [cursor.fetchone()]
-		if type == dict:
-			return [{column[0]: row[index] for index, column in enumerate(cursor.description)} for row in rows]
-		else:
-			return rows
+		return ExecutionCursor(cursor).fetch(type_fetch, type)
 
 	def insert(self, table = None, **columns):
 		'''Inserts "columns" into "table"
@@ -199,9 +198,10 @@ class Database(sqlite3.Connection):
 		if not table:
 			table = self.table
 		column_names = ['`{column}`'.format(column = column) for column in columns.keys()]
-		values = map(escapeString, [columns[column.replace('`', '')] for column in column_names])
-		query = "INSERT INTO {table} ({columns}) VALUES ({values})".format(table = table, columns = ','.join(column_names), values = ','.join(map(str, values)))
-		return self.execute(query)
+		values = tuple(columns[column.replace('`', '')] for column in column_names)
+		value_string = '?, ' * (len(values) - 1) + '?'
+		query = "INSERT INTO {table} ({columns}) VALUES ({values})".format(table = table, columns = ','.join(column_names), values = value_string)
+		return self.execute(query, values)
 
 	def update(self, table = None, equal = None, like = None, where = "1 = 1", **columns):
 		'''Updates columns in the table
@@ -223,12 +223,18 @@ class Database(sqlite3.Connection):
 			equal = {}
 		if not like:
 			like = {}
-		column_str = ','.join("{column}={value}".format(column = column, value = value) for column, value in columns.iteritems())
-		like = ' AND '.join("`{column}` LIKE '{pattern}'".format(column = column, pattern = pattern) for column, pattern in like.iteritems())
-		equal = ' AND '.join('`{column}` = {pattern}'.format(column = column, pattern = escapeString(pattern)) for column, pattern in equal.iteritems())
-		where = ' AND '.join(filter(lambda item: bool(item), [like, equal, where]))
+		column_items = columns.items()
+		column_str = ','.join("`{column}` = ?".format(column = column[0]) for column in column_items)
+		values = [column[1] for column in column_items]
+		like_items = like.items()
+		like_str = ' AND '.join("`{column}` LIKE ?".format(column = column[0]) for column in like_items)
+		values.extend([column[1] for column in like_items])
+		equal_items = equal.items()
+		equal_str = ' AND '.join("`{column}` = ?".format(column = column[0]) for column in equal_items)
+		values.extend([column[1] for column in equal_items])
+		where = ' AND '.join(filter(lambda item: bool(item), [like_str, equal_str, where]))
 		query = "UPDATE {table} SET {columns} WHERE {where}".format(table = table, columns = column_str, where = where)
-		return self.execute(query)
+		return self.execute(query, tuple(values))
 
 	def select(self, table = None, **options):
 		'''Selects "columns" from "table"
@@ -250,11 +256,15 @@ class Database(sqlite3.Connection):
 		columns = ','.join('`{column}`'.format(column = column) for column in options.get('columns', ALL))
 		if columns == "`*`":
 			columns = "*"
-		like = ' AND '.join("`{column}` LIKE '{pattern}'".format(column = column, pattern = pattern) for column, pattern in options.get('like', {}).iteritems())
-		equal = ' AND '.join('`{column}` = {pattern}'.format(column = column, pattern = escapeString(pattern)) for column, pattern in options.get('equal', {}).iteritems())
-		where = ' AND '.join(filter(lambda item: bool(item), [like, equal, options.get('where', '1 = 1')]))
+		like_items = options.get('like', {}).items()
+		like_str = ' AND '.join("`{column}` LIKE ?".format(column = column[0]) for column in like_items)
+		values = [column[1] for column in like_items]
+		equal_items = options.get('equal', {}).items()
+		equal_str = ' AND '.join("`{column}` = ?".format(column = column[0]) for column in equal_items)
+		values.extend([column[1] for column in equal_items])
+		where = ' AND '.join(filter(lambda item: bool(item), [like_str, equal_str, options.get('where', '1 = 1')]))
 		query = "SELECT {columns} FROM {table} WHERE {where}".format(columns = columns, table = table, where = where)
-		return self.execute(query)
+		return self.execute(query, values)
 
 	def delete(self, table = None, **options):
 		'''Deletes rows from the table
@@ -271,11 +281,17 @@ class Database(sqlite3.Connection):
 		returns a sqlite3.Cursor instance'''
 		if not table:
 			table = self.table
-		like = ' AND '.join("`{column}` LIKE '{pattern}'".format(column = column, pattern = pattern) for column, pattern in options.get('like', {}).iteritems())
-		equal = ' AND '.join('`{column}` = {pattern}'.format(column = column, pattern = escapeString(pattern)) for column, pattern in options.get('equal', {}).iteritems())
-		where = ' AND '.join(filter(lambda item: bool(item), [like, equal, options.get('where', '1 = 1')]))
+		like_items = options.get('like', {}).items()
+		like_str = ' AND '.join("`{column}` LIKE ?".format(column = column[0]) for column in like_items)
+		values = [column[1] for column in like_items]
+		equal_items = options.get('equal', {}).items()
+		equal_str = ' AND '.join("`{column}` = ?".format(column = column[0]) for column in equal_items)
+		values.extend([column[1] for column in equal_items])
+		# like = ' AND '.join("`{column}` LIKE '{pattern}'".format(column = column, pattern = pattern) for column, pattern in options.get('like', {}).iteritems())
+		# equal = ' AND '.join('`{column}` = {pattern}'.format(column = column, pattern = escapeString(pattern)) for column, pattern in options.get('equal', {}).iteritems())
+		where = ' AND '.join(filter(lambda item: bool(item), [like_str, equal_str, options.get('where', '1 = 1')]))
 		query = "DELETE FROM {table} WHERE {where}".format(table = table, where = where)
-		return self.execute(query)
+		return self.execute(query, values)
 
 	def count(self):
 		'''Finds the number of rows created, modified, or deleted during this database connection
@@ -301,8 +317,30 @@ class Database(sqlite3.Connection):
 		returns None'''
 		self.reset_counter = self.count()
 
+class ExecutionCursor(object):
+	'''Provides additional functionality to the sqlite3.Cursor object'''
+	def __init__(self, cursor):
+		self.cursor = cursor
+		self.fetched = None
+
+	def fetch(self, type_fetch = "all", type = dict):
+		'''Fetches columns from the cursor
+
+		Arguments:
+			type_fetch - how many to fetch (all, one)
+			type - type of fetch (dict, list)'''
+		if self.fetched:
+			return self.fetched
+		rows = self.cursor.fetchall() if type_fetch == "all" else [self.cursor.fetchone()]
+		if type == dict:
+			return_value =  [{column[0]: row[index] for index, column in enumerate(self.cursor.description)} for row in rows]
+		else:
+			return_value =  rows
+		self.fetched = return_value
+		return return_value
+
 ### Misc. Functions
 
 def escapeString(value):
 	'''Escapes a string'''
-	return "'{string}'".format(string = value) if isinstance(value, str) else value
+	return "'{string}'".format(string = value) if isinstance(value, basestring) else value
