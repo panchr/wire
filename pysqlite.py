@@ -90,7 +90,7 @@ class Database(sqlite3.Connection):
 
 		returns a sqlite3.Cursor instance'''
 		if self.debug:
-			print cmd, args, kwargs
+			print(cmd, args, kwargs)
 		exec_cursor = self.newCursor()
 		exec_cursor.execute(cmd, *args, **kwargs)
 		self.commit()
