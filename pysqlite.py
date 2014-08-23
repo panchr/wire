@@ -34,6 +34,20 @@ class Database(sqlite3.Connection):
 		self.table = None
 		self.debug = False
 
+	def toggle(self, option):
+		'''Toggles an option
+
+		Arguments:
+			option - name of option to toggle
+
+		Usage:
+			db.toggle("debug")
+
+		Returns the new value of the option'''
+		new_value = not getattr(self, option)
+		setattr(self, option, new_value)
+		return new_value
+
 	@staticmethod
 	def create(name, file_path):
 		'''Creates an SQLite database from an SQL file
@@ -75,7 +89,7 @@ class Database(sqlite3.Connection):
 			db.purgeCursors()
 
 		returns None'''
-		for cursor_id, cursor in self.cursors.iteritems():
+		for cursor_id, cursor in self.cursors.tems():
 			del self.cursors[cursor_id]
 			del cursor
 
@@ -199,10 +213,11 @@ class Database(sqlite3.Connection):
 		returns a sqlite3.Cursor instance'''
 		if not table:
 			table = self.table
-		column_names = ['`{column}`'.format(column = column) for column in columns.keys()]
-		values = tuple(columns[column.replace('`', '')] for column in column_names)
-		value_string = '?, ' * (len(values) - 1) + '?'
-		query = "INSERT INTO {table} ({columns}) VALUES ({values})".format(table = table, columns = ','.join(column_names), values = value_string)
+		column_values = columns.items()
+		column_names = ', '.join(map(escapeColumn, extract(column_values)))
+		values = extract(column_values, 1)
+		value_string = ', '.join("?" * len(values))
+		query = "INSERT INTO {table} ({columns}) VALUES ({values})".format(table = table, columns = column_names, values = value_string)
 		return self.execute(query, values)
 
 	def update(self, table = None, equal = None, like = None, where = "1 = 1", **columns):
@@ -221,19 +236,10 @@ class Database(sqlite3.Connection):
 		returns a sqlite3.Cursor instance'''
 		if not table:
 			table = self.table
-		if not equal:
-			equal = {}
-		if not like:
-			like = {}
-		column_items = columns.items()
-		column_str = ','.join("`{column}` = ?".format(column = column[0]) for column in column_items)
-		values = [column[1] for column in column_items]
-		like_items = like.items()
-		like_str = ' AND '.join("`{column}` LIKE ?".format(column = column[0]) for column in like_items)
-		values.extend([column[1] for column in like_items])
-		equal_items = equal.items()
-		equal_str = ' AND '.join("`{column}` = ?".format(column = column[0]) for column in equal_items)
-		values.extend([column[1] for column in equal_items])
+		column_values = columns.items()
+		column_str = joinOperatorExpressions(extract(column_values), ',')
+		like_str, equal_str, values_like_equal = inputToQueryString(like, equal)
+		values = extract(column_values, 1) + values_like_equal
 		where = ' AND '.join(filter(lambda item: bool(item), [like_str, equal_str, where]))
 		query = "UPDATE {table} SET {columns} WHERE {where}".format(table = table, columns = column_str, where = where)
 		return self.execute(query, tuple(values))
@@ -255,15 +261,12 @@ class Database(sqlite3.Connection):
 		returns a sqlite3.Cursor instance'''
 		if not table:
 			table = self.table
-		columns = ','.join('`{column}`'.format(column = column) for column in options.get('columns', ALL))
-		if columns == "`*`":
-			columns = "*"
-		like_items = options.get('like', {}).items()
-		like_str = ' AND '.join("`{column}` LIKE ?".format(column = column[0]) for column in like_items)
-		values = [column[1] for column in like_items]
-		equal_items = options.get('equal', {}).items()
-		equal_str = ' AND '.join("`{column}` = ?".format(column = column[0]) for column in equal_items)
-		values.extend([column[1] for column in equal_items])
+		user_columns = options.get('columns')
+		if user_columns:
+			columns = ','.join('`{column}`'.format(column = column) for column in user_columns)
+		else:
+			columns = ALL
+		like_str, equal_str, values = inputToQueryString(options.get('like'), options.get('equal'))
 		where = ' AND '.join(filter(lambda item: bool(item), [like_str, equal_str, options.get('where', '1 = 1')]))
 		query = "SELECT {columns} FROM {table} WHERE {where}".format(columns = columns, table = table, where = where)
 		return self.execute(query, values)
@@ -283,13 +286,8 @@ class Database(sqlite3.Connection):
 		returns a sqlite3.Cursor instance'''
 		if not table:
 			table = self.table
-		like_items = options.get('like', {}).items()
-		like_str = ' AND '.join("`{column}` LIKE ?".format(column = column[0]) for column in like_items)
-		values = [column[1] for column in like_items]
-		equal_items = options.get('equal', {}).items()
-		equal_str = ' AND '.join("`{column}` = ?".format(column = column[0]) for column in equal_items)
-		values.extend([column[1] for column in equal_items])
-		where = ' AND '.join(filter(lambda item: bool(item), [like_str, equal_str, options.get('where', '1 = 1')]))
+		like_str, equal_str, values = inputToQueryString(options.get('like'), options.get('equal'))
+		where = ' AND '.join(filter(lambda item: bool(item), [like_str, equal_str, options.get('where', '1 = 0')]))
 		query = "DELETE FROM {table} WHERE {where}".format(table = table, where = where)
 		return self.execute(query, values)
 
@@ -329,7 +327,12 @@ class ExecutionCursor(object):
 
 		Arguments:
 			type_fetch - how many to fetch (all, one)
-			type - type of fetch (dict, list)'''
+			type - type of fetch (dict, list)
+
+		Usage:
+			users = db.select("users").fetch()
+			
+		returns query results in specified format'''
 		if self.fetched:
 			return self.fetched
 		rows = self.cursor.fetchall() if type_fetch == "all" else [self.cursor.fetchone()]
@@ -347,7 +350,7 @@ class ExecutionCursor(object):
 			filepath - path of the CSV file(defaults to "sqlite_export.csv")
 
 		Usage:
-			db.export("mytable.csv")
+			db.select("users").export("mytable.csv")
 
 		returns None'''
 		with open(filepath, 'wb') as csv_file:
@@ -357,6 +360,85 @@ class ExecutionCursor(object):
 
 ### Misc. Functions
 
+def extract(values, index = 0):
+	'''Extracts the index value from each value
+
+	Arguments:
+		values - list of lists to extract from
+		index - index to select from each sublist (optional, defaults to 0)
+
+	Usage:
+		columns = extract([["a", 1], ["b", 2]]) # ["a", "b"]
+		values  = extract([["a", 1], ["b", 2]], 1) # [1, 2]
+
+	returns list of selected elements'''
+	return map(lambda item: item[index], values)
+
 def escapeString(value):
-	'''Escapes a string'''
+	'''Escapes a string
+
+	Arguments:
+		value - value to escape
+
+	Usage:
+		escaped_value = escapeString("value") # 'value'
+
+	returns escaped string'''
 	return "'{string}'".format(string = value) if isinstance(value, basestring) else value
+
+def escapeColumn(value):
+	'''Escapes a column name
+
+	Arguments:
+		value - column name to escape
+
+	Usage:
+		escaped_column = escapeColumn("time") # `time`
+
+	returns escaped column name'''
+	return "`{column}`".format(column = value)
+
+def joinExpressions(exps, operator, func = lambda item: item):
+	'''Joins numerous expressions with an operator
+
+	Arguments:
+		exps - iterable list of expressions to join
+		operator - operator to use in joining expressions (OR, AND, LIKE, etc)
+		func - optional function to call on each expression before joining
+
+	Usage:
+		joined_expr = joinExpressions(["date = NOW", "id = 1"], "OR") # date = NOW OR id = 1
+		joined_expr = joinExpressions(["date = NOW", "id = 1"], "OR", escapeColumn) # `date` = NOW OR `id` = 1
+
+	returns joined expressions as one string'''
+	new_op = " {op} ".format(op = operator)
+	return new_op.join(func(exp) for exp in exps)
+
+def joinOperatorExpressions(exps, operator, second_operator = "=", value = "?"):
+	'''Joins numerous expressions with two operators (see below)
+
+	Arguments:
+		exps - iterable list of expressions to join
+		operator - operator to use in joining expressions (OR, AND, LIKE, etc)
+		second_operator - operator to join each expression and value (defaults to =)
+		value - what to be used as a value with the second_operator (defaults to ?)
+
+	Usage:
+		joined_expr = joinOperatorExpressions(["date", "now"], "OR") # `date` = ? OR `now` = ?
+		joined_expr = joinOperatorExpressions(["date", "now"], "OR", "LIKE", "'%'") # `date` LIKE '%' OR `now` LIKE '%'
+
+	returns joined expressions as one string'''
+	func = lambda item: "{column} {operator} {exp}".format(column = escapeColumn(item) , operator = second_operator, exp = value)
+	return joinExpressions(exps, operator, func)
+
+def inputToQueryString(like, equal):
+	'''Internal function --- converts user input to an SQL string'''
+	if not like:
+		like = {}
+	if not equal:
+		equal = {}
+	like_items, equal_items = like.items(), equal.items()
+	like_str = joinOperatorExpressions(extract(like_items), 'AND', "LIKE")
+	equal_str = joinOperatorExpressions(extract(equal_items), "AND")
+	values = extract(like_items, 1) + extract(equal_items, 1)
+	return like_str, equal_str, values
