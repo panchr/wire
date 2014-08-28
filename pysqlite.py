@@ -6,6 +6,7 @@
 ### Imports
 
 import sqlite3
+import atexit
 import time
 import csv
 
@@ -26,13 +27,14 @@ class Database(sqlite3.Connection):
 		Usage:
 			db = Database("test.db")
 
-		returns a Database (wrapper to sqlite3.Connection) instance'''
+		returns a Database (wrapper to sqlite3.Connection) object'''
 		sqlite3.Connection.__init__(self, path, *args, **kwargs)
 		self.path = path
 		self.cursors = {}
 		self.reset_counter = 0
 		self.defaultTable = None
 		self.debug = False
+		atexit.register(self.close)
 
 	def toggle(self, option):
 		'''Toggles an option
@@ -73,7 +75,7 @@ class Database(sqlite3.Connection):
 		Usage:
 			cursor = db.newCursor()
 
-		returns a sqlite3.Cursor instance'''
+		returns an sqlite3.Cursor'''
 		new_cursor = self.cursor()
 		cursor_id = hex(int(1000 * time.time())) + hex(id(new_cursor))
 		self.cursors[cursor_id] = new_cursor
@@ -114,7 +116,7 @@ class Database(sqlite3.Connection):
 		Usage:
 			query = db.execute("SELECT * FROM MY_TABLE")
 
-		returns a sqlite3.Cursor instance'''
+		returns an ExecutionCursor object'''
 		if self.debug:
 			print(cmd, args, kwargs)
 		exec_cursor = self.newCursor()
@@ -128,6 +130,19 @@ class Database(sqlite3.Connection):
 		This is the same as self.execute'''
 		return self.execute(cmd, *args, **kwargs)
 
+	def pragma(self, cmd):
+		'''Executes an SQL PRAGMA function
+
+		Arguments:
+			cmd - command string
+
+		Usage:
+			query = db.pragma("INTEGRITY_CHECK")
+
+		returns an ExecutionCursor object'''
+		query = SQLString.pragma(cmd)
+		return self.execute(query)
+
 	def executeFile(self, file_path):
 		'''Executes the commands from a file path; each command is delimited with a semicolon
 
@@ -137,7 +152,7 @@ class Database(sqlite3.Connection):
 		Usage:
 			query = db.executeFile("my_commands.sql")
 
-		returns a sqlite3.Cursor instance'''
+		returns an ExecutionCursor object'''
 		with open(file_path, 'r') as sql_file:
 			sql_script = sql_file.read()
 		return self.script(sql_script)
@@ -152,7 +167,7 @@ class Database(sqlite3.Connection):
 			query = db.script("""CREATE TABLE users (id INT NOT NULL, USERNAME VARCHAR(50));
 				INSERT INTO users (1, 'panchr');""")
 
-		returns a sqlite3.Cursor instance'''
+		returns an ExecutionCursor object'''
 		exec_cursor = self.newCursor()
 		exec_cursor.executescript(sql_script)
 		self.commit()
@@ -182,6 +197,20 @@ class Database(sqlite3.Connection):
 		returns None'''
 		self.reset_counter = self.count()
 
+	def checkIntegrity(self, max_errors = 100):
+		'''Checks the Database Integrity 
+
+		Arguments:
+			max_errors (default: 100) - number of maximum errors to be displayed
+
+		Usage:
+			errors = db.checkIntegrity()
+
+		returns True if there are no errors, or a list of errors'''
+		query = SQLString.checkIntegrity(max_errors)
+		results = self.execute(query).fetch()
+		return True if (len(results) == 1 and results[0]["integrity_check"] == "ok") else results
+
 	def fetch(self, cursor, type_fetch = "all", type = dict):
 		'''Fetches columns from the cursor
 
@@ -191,20 +220,25 @@ class Database(sqlite3.Connection):
 			type - type of fetch (dict, list)'''
 		return ExecutionCursor(cursor).fetch(type_fetch, type)
 
-	def tables(self, objects = False):
+	def tables(self, objects = False, temp = False):
 		'''Shows the tables in the database
 
 		Arguments:
 			objects - whether or not to return as Table objects (defaults to False)
+			temp - whether or not to include Temporary tables
 
 		Usage:
 			tables = db.tables()
 
 		returns a list of table names'''
-		names = map(lambda item: item["name"], self.select("sqlite_master", columns = ["name"], equal = {"type": "table"}).fetch())
-		return map(Table, names) if objects else names
+		if temp:
+			query = "SELECT name FROM (SELECT * FROM sqlite_master UNION SELECT * FROM sqlite_temp_master) WHERE type = 'table' ORDER BY name"
+		else:
+			query = "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
+		names = map(lambda item: item["name"], self.execute(query).fetch())
+		return map(lambda table: Table(self, table, False), names) if objects else names
 
-	def table(self, name):
+	def table(self, name, verify = True):
 		'''Creates a Table object
 
 		Arguments:
@@ -214,23 +248,20 @@ class Database(sqlite3.Connection):
 			table = db.table("users")
 
 		returns a Table object'''
-		if self.tableExists(name):
-			return Table(self, name)
-		else:
-			raise ValueError("Table {name} does not exist".format(name = name))
+		return Table(self, name, verify)
 
-	def tableExists(self, name):
-		'''Checks if a database table tableExists
+	def tableExists(self, name, temp = False):
+		'''Checks if a database table exists 
 
 		Arguments:
 			name - name of table to check
+			temp - whether or not to check temporary tables
 
 		Usage:
 			table_exists = db.tableExists("users")
 
 		returns True if the table exists or False'''
-		names = self.select("sqlite_master", columns = ["name"], equal = {"type": "table", "name": name}).fetch()
-		return len(names) > 0
+		return name in self.tables(temp = temp)
 
 	def setTable(self, table):
 		'''Sets the default table to use for queries
@@ -244,11 +275,11 @@ class Database(sqlite3.Connection):
 		returns None'''
 		self.defaultTable = table
 
-	def createTable(self, name, **columns):
+	def createTable(self, name, temporary = False, **columns):
 		'''Creates a table in the database
 
 		see Table.create for further reference'''
-		return Table.create(self, name, **columns)
+		return Table.create(self, name, temporary, **columns)
 
 	def dropTable(self, name):
 		'''Drops a table from the database
@@ -262,12 +293,12 @@ class Database(sqlite3.Connection):
 
 		Arguments:
 			table - table name to insert into
-			columns - dictionary of column names and values {column_name: value, ...}
+			**columns - dictionary of column names and values {column_name: value, ...}
 
 		Usage:
 			db.insert("users", id = 1, username = "panchr"))
 
-		returns a sqlite3.Cursor instance'''
+		returns an ExecutionCursor object'''
 		if not table:
 			table = self.defaultTable
 		query, values = SQLString.insert(table, **columns)
@@ -281,12 +312,12 @@ class Database(sqlite3.Connection):
 			equal - dictionary of columns and values to use in WHERE  + "=" clauses {column_name: value, ...}
 			like - dictionary of columns and values to use in WHERE + LIKE clauses (column_name: pattern, ...}
 			where - custom WHERE and/or LIKE clause(s)
-			columns - dictionary of column names and values {column_name: value, ...}
+			**columns - dictionary of column names and values {column_name: value, ...}
 
 		Usage:
 			db.update("table", equal = {"id": 5}, username = "new_username")
 
-		returns a sqlite3.Cursor instance'''
+		returns an ExecutionCursor object'''
 		if not table:
 			table = self.defaultTable
 		query, values = SQLString.update(table, equal, like, where, **columns)
@@ -306,7 +337,7 @@ class Database(sqlite3.Connection):
 			query = db.select("users", columns = ALL, equal = {"id": 1}, like = {"username": "pan%"})
 			query = db.select("users", columns = ALL, where = "`ID` = 1 OR `USERNAME` LIKE 'pan%'")
 
-		returns a sqlite3.Cursor instance'''
+		returns an ExecutionCursor object'''
 		if not table:
 			table = self.defaultTable
 		query, values = SQLString.select(table, **options)
@@ -324,7 +355,7 @@ class Database(sqlite3.Connection):
 		Usage:
 			db.delete("users", equal = {"id": 5})
 
-		returns a sqlite3.Cursor instance'''
+		returns an ExecutionCursor object'''
 		if not table:
 			table = self.defaultTable
 		query, values = SQLString.delete(table, **options)
@@ -332,12 +363,13 @@ class Database(sqlite3.Connection):
 
 class Table(object):
 	'''Models a Database table'''
-	def __init__(self, db, table):
+	def __init__(self, db, table, verify = True):
 		'''Creates the Table object
 
 		Arguments:
 			db - Database object
 			table - table name to use
+			verify - whether or not to check if the table exists
 
 		Usage:
 			table = Table(db, "users")
@@ -345,28 +377,54 @@ class Table(object):
 		returns the Table object'''
 		self.db, self.name = db, table
 		self.execute = self.db.execute
-		if not self.db.tableExists(table):
+		# print self.db.tableExists(table, temp = True), verify
+		if verify and not self.db.tableExists(table, temp = True):
 			raise ValueError('Table {name} does not exist in database'.format(name = table))
 
+	def info(self):
+		'''Retrieves the table info in the table
+
+		Arguments:
+			None
+
+		Usage:
+			info = db.table("users").info()
+
+		returns an ExecutionCursor object'''
+		return self.db.pragma("table_info({table})".format(table = self.name))
+
+	def columns(self):
+		'''Retrieves the columns in the table
+
+		Arguments:
+			None
+
+		Usage:
+			columns = db.table("users").columns()
+
+		returns a list of columns'''
+		return map(lambda item: item["name"], self.info().fetch())
+
 	@staticmethod
-	def create(self, db, name, **columns):
+	def create(db, name, temporary = False,**columns):
 		'''Creates a new Table in the database
 
 		Arguments:
 			name - table name
-			columns - dictionary of column names and value types (or a list of [type, default])
+			temporary (default: False) - whether or not the table should be temporary
+			**columns - dictionary of column names and value types (or a list of [type, default value])
 				{column_name: value_type, other_column: [second_type, default_value], ...}
 
 		Usage:
-			db.createTable("users", "id" = "INT", username =  ["VARCHAR(50)", "user"])
+			db.createTable("users", id = "INT", username =  ["VARCHAR(50)", "user"])
 
 		returns a Table object'''
-		query = SQLString.createTable(name, **columns)
+		query = SQLString.createTable(name, temporary, **columns)
 		db.execute(query)
-		return db.table(name)
+		return db.table(name, False)
 
 	def drop(self):
-		'''Drops a table from the database
+		'''Drops the table from the database
 
 		Arguments:
 			name - name of the table to be dropped
@@ -374,10 +432,82 @@ class Table(object):
 		Usage:
 			db.dropTable("users")
 
-		returns an sqlite3.Cursor instance'''
+		returns an ExecutionCursor object'''
 		query = SQLString.dropTable(self.name)
 		return self.execute(query)
 
+	def rename(self, name):
+		'''Renames the current table
+
+		Arguments:
+			name - new name for the table
+
+		Usage:
+			db.table("users").rename("old_users")
+			
+		returns an ExecutionCursor object'''
+		query = SQLString.rename(self.name, name)
+		return self.execute(query)
+
+	def addColumns(self, **columns):
+		'''Adds columns to the table
+
+		Arguments:
+			**columns - dictionary of column names and value types (or a list of [type, default value])
+				{column_name: value_type, other_column: [second_type, default_value], ...}
+
+		Usage:
+			db.table("users").addColumns(user_type = "VARCHAR(255)", user_tier = ["INT", 0])
+
+		returns an ExecutionCursor object'''
+		add_trans = self.db.transaction()
+		for column, value in columns.items():
+			query = SQLString.addColumn(self.name, column, value)
+			add_trans.execute(query)
+		return add_trans.commit()
+
+	def dropColumns(self, *columns): # also need to copy indices and other metadata
+		'''Drops columns from the table
+
+		Arguments:
+			*columns - list of columns to drop
+
+		Usage:
+			db.table("users").dropColumns("user_type", "user_tier")
+
+		returns an ExecutionCursor object'''
+		drop_trans = self.db.transaction()
+		temp_name = self.name + str(int(time.time()))
+		keep_columns = list(set(self.columns()).difference(columns))
+		column_str = ", ".join(keep_columns)
+		drop_trans.execute("CREATE TABLE {name} ({columns})".format(name = temp_name, columns = column_str))
+		drop_trans.execute("INSERT INTO {new_table} SELECT {columns} FROM {old_table}".format(new_table = temp_name, old_table = self.name, columns = column_str))
+		self.drop()
+		self.db.table(temp_name).rename(self.name)
+		return drop_trans.commit()
+
+	def renameColumns(self, **columns): # also need to copy indices and other metadata
+		'''Renames columns in the table
+
+		Arguments:
+			**columns - dictionary of names and new names
+
+		Usage:
+			db.table("users").renameColumns(id = "user_id")
+
+		returns an ExecutionCursor object'''
+		ren_trans = self.db.transaction()
+		temp_name = self.name + str(int(time.time()))
+		column_names = list(columns.items())
+		old_names, new_names = SQLString.extract(column_names), SQLString.extract(column_names, 1)
+		current_columns = self.columns()
+		keep_columns = list(set(current_columns).difference(old_names))
+		new_columns = keep_columns + new_names
+		ren_trans.execute("CREATE TABLE {name} ({columns})".format(name = temp_name, columns = ', '.join(new_columns)))
+		ren_trans.execute("INSERT INTO {new_table} SELECT {columns} FROM {old_table}".format(new_table = temp_name, old_table = self.name, columns = ', '.join(current_columns)))
+		self.drop()
+		self.db.table(temp_name).rename(self.name)
+		return ren_trans.commit()
 
 	def insert(self, **columns):
 		'''Inserts rows into the table
@@ -404,7 +534,7 @@ class Table(object):
 		return self.db.delete(self.name, **options)
 
 class ExecutionCursor(object):
-	'''Provides additional functionality to the sqlite3.Cursor object'''
+	'''Provides additional functionality to the ExecutionCursor object'''
 	def __init__(self, cursor):
 		self.cursor = cursor
 		self.fetchall, self.fetchone, self.description = self.cursor.fetchall, self.cursor.fetchone, self.cursor.description
@@ -461,7 +591,7 @@ class Transaction(Database):
 		self.db = db
 		self.cursor = db.newCursor()
 		self.fetchall, self.fetchone, self.description = self.cursor.fetchall, self.cursor.fetchone, self.cursor.description
-		self.commit, self.rollback = self.db.commit, self.db.rollback
+		self.rollback = self.db.rollback
 		self.reset_counter = 0
 		self.defaultTable = None
 		self.debug = False
@@ -482,6 +612,15 @@ class Transaction(Database):
 			print(cmd, args, kwargs)
 		self.cursor.execute(cmd, *args, **kwargs)
 
+	def commit(self):
+		'''Commits the changes to the database
+
+		see sqlite3.Connection.commit for further reference
+
+		Returns an ExecutionCursor object'''
+		self.db.commit()
+		return ExecutionCursor(self.cursor)
+
 	def count(self):
 		'''Returns the affected rows since last reset
 
@@ -491,16 +630,33 @@ class Transaction(Database):
 class SQLString(object):
 	'''Internal class --- provides SQL string creation functions'''
 	@classmethod
-	def createTable(cls, name, **columns):
+	def pragma(cls, cmd):
+		'''Generates a PRAGMA SQL query
+
+		See Database.pragma for further reference'''
+		query = "PRAGMA {cmd}".format(cmd = cmd)
+		return query
+
+	@classmethod
+	def checkIntegrity(cls, errors):
+		'''Generates a PRAGMA INTEGRITY_CHECK query
+
+		See Database.checkIntegrity for further reference'''
+		query = cls.pragma("INTEGRITY_CHECK({errors})".format(errors = errors))
+		return query
+
+	@classmethod
+	def createTable(cls, name, temporary, **columns):
 		'''Generates a CREATE TABLE query
 
 		See Database.createTable for further reference'''
-		for column, value in columns.iteritems():
+		for column, value in columns.items():
 			if isinstance(value, list):
 				columns[column] = "{type} DEFAULT {default}".format(type = value[0], default = value[1])
 			else:
 				columns[column] = "{type}{other}".format(type = value, other = " NOT NULL" if value.lower() != "null" else "")
-		query = "CREATE TABLE {table} ({columns})".format(table = name, columns = ','.join(column + ' ' + columns[column] for column in columns))
+		column_str = ','.join(column + ' ' + columns[column] for column in columns)
+		query = "CREATE {temp}TABLE {table} ({columns})".format(temp = "TEMPORARY " if temporary else "", table = name, columns = column_str)
 		return query
 
 	@classmethod
@@ -512,11 +668,31 @@ class SQLString(object):
 		return query
 
 	@classmethod
+	def rename(cls, name, new_name):
+		'''Generates an ALTER TABLE RENAME SQL query
+
+		See Table.rename for further reference'''
+		query = "ALTER TABLE {table} RENAME TO {name}".format(table = name, name = new_name)
+		return query
+
+	@classmethod
+	def addColumn(cls, table, name, col_type):
+		'''Generates an ALTER TABLE ADD SQL query
+
+		see Table.addColumns for further reference'''
+		if isinstance(col_type, list):
+			column_str = "{type} DEFAULT {default}".format(type = col_type[0], default = col_type[1])
+		else:
+			column_str = "{type}{other}".format(type = col_type, other = " NOT NULL" if col_type.lower() != "null" else "")
+		query = "ALTER TABLE {table} ADD COLUMN {name} {type}".format(table = table, name = name, type = column_str)
+		return query
+
+	@classmethod
 	def insert(cls, table, **columns):
 		'''Generates an INSERT SQL query
 
 		see Database.insert for further reference'''
-		column_values = columns.items()
+		column_values = list(columns.items())
 		column_names = ', '.join(map(cls.escapeColumn, cls.extract(column_values)))
 		values = cls.extract(column_values, 1)
 		value_string = ', '.join("?" * len(values))
@@ -528,7 +704,7 @@ class SQLString(object):
 		'''Generates an UPDATE SQL query
 
 		see Database.update for further reference'''
-		column_values = columns.items()
+		column_values = list(columns.items())
 		column_str = cls.joinOperatorExpressions(cls.extract(column_values), ',')
 		like_str, equal_str, values_like_equal = cls.inputToQueryString(like, equal)
 		values = cls.extract(column_values, 1) + values_like_equal
@@ -642,7 +818,7 @@ class SQLString(object):
 		'''Joins numerous clauses with the AND operator
 
 		Arguments:
-			clauses - the clauses to join 
+			*clauses -list of clauses to join 
 
 		Usage:
 			clause = joinClauses('`user` LIKE 'name%', '`id` = 5')
@@ -666,7 +842,7 @@ class SQLString(object):
 			like = {}
 		if not equal:
 			equal = {}
-		like_items, equal_items = like.items(), equal.items()
+		like_items, equal_items = list(like.items()), list(equal.items())
 		like_str = cls.joinOperatorExpressions(cls.extract(like_items), 'AND', "LIKE")
 		equal_str = cls.joinOperatorExpressions(cls.extract(equal_items), "AND")
 		values = cls.extract(like_items, 1) + cls.extract(equal_items, 1)
