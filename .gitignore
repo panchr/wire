@@ -52,5 +52,9 @@ coverage.xml
 # Sphinx documentation
 docs/_build/
 
-# Other directors
+# Other directories
 etc/
+
+# Sublime Project
+*.sublime-project
+*.sublime-workspace

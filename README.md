@@ -1,12 +1,14 @@
-PySQLite
+Wire
 ========
 
-Python Wrapper for the standard sqlite3 API
+Python Wrapper for the standard Database APIs
 
-PySQLite serves to simplify the process of creating and maintaining local databases.
+Wire serves to simplify the process of creating and maintaining local (or remote) databases.
 
 It utilizes the built-in sqlite3 package, and does not require any external files.
 Because of this, it is extremely lightweight.
+
+Coming Soon: Configure *wire* to be used with other Database Engines (such as MySQL, or PostgreSQL)
 
 Examples
 ------------
@@ -15,10 +17,10 @@ Examples
 
 ```python
 
-import pysqlite
+import wire
 # the import is assumed for the rest of the examples
 
-db = pysqlite.Database("test.db")
+db = wire.Database("test.db")
 # the database is created if it does not exist already
 ```
 
@@ -26,7 +28,7 @@ Alternatively, a database can be created by executing a script of SQL commands:
 
 ```python
 
-db = pysqlite.Database.create("test.db", "test_creator.sql")
+db = wire.Database.create("test.db", "test_creator.sql")
 ```
 
 ### Creating or Dropping Tables
@@ -83,7 +85,7 @@ db.insert("users", id = 5, username = "panchr")
 Whenever you want to update, select, or delete a row, you have to specify a clause.
 This clause searches for specific rows. If a clause is not provided, the query will be executed on **every** row (it defaults to *1 = 1*).
 
-Currently, PYSQLite supports three types of clauses (combinations among the three are allowed): *WHERE*, *LIKE*, and a mix.
+Currently, *wire* supports three types of clauses (combinations among the three are allowed): *WHERE*, *LIKE*, and a mix.
 
 These can be provided as arguments. To any function that requires a row filtering method, the following arguments are availabile:
 
