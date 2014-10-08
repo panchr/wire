@@ -222,3 +222,4 @@ class SQLString(object):
 		equal_str = cls.joinOperatorExpressions(cls.extract(equal_items), "AND")
 		values = cls.extract(like_items, 1) + cls.extract(equal_items, 1)
 		return like_str, equal_str, values
+		

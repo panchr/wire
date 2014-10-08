@@ -176,3 +176,4 @@ class Table(object):
 
 		see Database.delete for further reference'''
 		return self.db.delete(self.name, **options)
+		
