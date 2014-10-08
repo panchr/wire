@@ -55,6 +55,9 @@ docs/_build/
 # Other directories
 etc/
 
-# Sublime Project
+# Package stuff
+__init__.py
+
+# Sublime Project files
 *.sublime-project
 *.sublime-workspace
